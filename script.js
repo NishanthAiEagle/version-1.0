@@ -1,4 +1,3 @@
-
 const videoElement = document.getElementById('webcam');
 const canvasElement = document.getElementById('overlay');
 const canvasCtx = canvasElement.getContext('2d');
@@ -12,6 +11,19 @@ let lastSnapshotDataURL = '';
 let currentType = '';
 let smoothedLandmarks = null;
 
+// NEW: for TRY ALL
+let autoTryRunning = false;
+let autoTryTimeout = null;
+let autoTryIndex = 0;
+let autoSnapshots = [];
+const tryAllBtn = document.getElementById('tryall-btn');
+const flashOverlay = document.getElementById('flash-overlay');
+const galleryModal = document.getElementById('gallery-modal');
+const galleryMain = document.getElementById('gallery-main');
+const galleryThumbs = document.getElementById('gallery-thumbs');
+const galleryClose = document.getElementById('gallery-close');
+
+/* ------------ image load helpers ------------ */
 function loadImage(src) {
   return new Promise((resolve) => {
     const img = new Image();
@@ -35,6 +47,7 @@ function changeNecklace(src) {
   });
 }
 
+/* ------------ category / subcategory ------------ */
 function toggleCategory(category) {
   document.getElementById('subcategory-buttons').style.display = 'flex';
   const subButtons = document.querySelectorAll('#subcategory-buttons button');
@@ -42,51 +55,73 @@ function toggleCategory(category) {
     btn.style.display = btn.innerText.toLowerCase().includes(category) ? 'inline-block' : 'none';
   });
   document.getElementById('jewelry-options').style.display = 'none';
+
+  // stop TRY ALL if switching category
+  stopAutoTry();
 }
 
 function selectJewelryType(type) {
   currentType = type;
   document.getElementById('jewelry-options').style.display = 'flex';
 
-  // 🔁 Clear previously loaded images when switching category
+  // clear previous
   earringImg = null;
   necklaceImg = null;
   earringSrc = '';
   necklaceSrc = '';
 
-  let start = 1, end = 15;
+  const { start, end } = getRangeForType(type);
+  insertJewelryOptions(type, 'jewelry-options', start, end);
 
+  // stop TRY ALL when switching type
+  stopAutoTry();
+}
+
+/* ------------ generate list for one type ------------ */
+function getRangeForType(type) {
+  let start = 1, end = 15;
   switch (type) {
     case 'gold_earrings':     end = 16; break;
     case 'gold_necklaces':    end = 19; break;
-    case 'diamond_earrings':  end = 9; break;
-    case 'diamond_necklaces': end = 6; break;
+    case 'diamond_earrings':  end = 9;  break;
+    case 'diamond_necklaces': end = 6;  break;
     default:                  end = 15;
   }
-
-  insertJewelryOptions(type, 'jewelry-options', start, end);
+  return { start, end };
 }
 
+function buildImageList(type) {
+  const { start, end } = getRangeForType(type);
+  const list = [];
+  for (let i = start; i <= end; i++) {
+    list.push(`${type}/${type}${i}.png`);
+  }
+  return list;
+}
+
+/* ------------ UI thumbnails ------------ */
 function insertJewelryOptions(type, containerId, startIndex, endIndex) {
   const container = document.getElementById(containerId);
   container.innerHTML = '';
   for (let i = startIndex; i <= endIndex; i++) {
     const filename = `${type}${i}.png`;
+    const src = `${type}/${filename}`;
     const btn = document.createElement('button');
     const img = document.createElement('img');
-    img.src = `${type}/${filename}`;
+    img.src = src;
     btn.appendChild(img);
     btn.onclick = () => {
       if (type.includes('earrings')) {
-        changeEarring(`${type}/${filename}`);
+        changeEarring(src);
       } else {
-        changeNecklace(`${type}/${filename}`);
+        changeNecklace(src);
       }
     };
     container.appendChild(btn);
   }
 }
 
+/* ------------ Mediapipe FaceMesh ------------ */
 const faceMesh = new FaceMesh({
   locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/face_mesh/${file}`,
 });
@@ -130,7 +165,10 @@ videoElement.addEventListener('loadedmetadata', () => {
 
 camera.start();
 
+/* ------------ draw jewelry ------------ */
 function drawJewelry(landmarks, ctx) {
+  const context = ctx || canvasCtx;
+
   const earringScale = 0.07;
   const necklaceScale = 0.18;
 
@@ -150,30 +188,45 @@ function drawJewelry(landmarks, ctx) {
   if (earringImg) {
     const width = earringImg.width * earringScale;
     const height = earringImg.height * earringScale;
-    ctx.drawImage(earringImg, leftEar.x - width / 2, leftEar.y, width, height);
-    ctx.drawImage(earringImg, rightEar.x - width / 2, rightEar.y, width, height);
+    context.drawImage(earringImg, leftEar.x - width / 2, leftEar.y, width, height);
+    context.drawImage(earringImg, rightEar.x - width / 2, rightEar.y, width, height);
   }
 
   if (necklaceImg) {
     const width = necklaceImg.width * necklaceScale;
     const height = necklaceImg.height * necklaceScale;
-    ctx.drawImage(necklaceImg, neck.x - width / 2, neck.y, width, height);
+    context.drawImage(necklaceImg, neck.x - width / 2, neck.y, width, height);
   }
 }
 
+/* ------------ snapshot helpers ------------ */
+function triggerFlash() {
+  if (!flashOverlay) return;
+  flashOverlay.classList.add('active');
+  setTimeout(() => flashOverlay.classList.remove('active'), 180);
+}
+
+function captureSnapshotDataURL() {
+  const snapshotCanvas = document.createElement('canvas');
+  const ctx = snapshotCanvas.getContext('2d');
+  snapshotCanvas.width = videoElement.videoWidth;
+  snapshotCanvas.height = videoElement.videoHeight;
+  ctx.drawImage(videoElement, 0, 0, snapshotCanvas.width, snapshotCanvas.height);
+  if (smoothedLandmarks) {
+    drawJewelry(smoothedLandmarks, ctx);
+  }
+  return snapshotCanvas.toDataURL('image/png');
+}
+
+/* ------------ manual snapshot button ------------ */
 function takeSnapshot() {
   if (!smoothedLandmarks) {
     alert("Face not detected. Please try again.");
     return;
   }
 
-  const snapshotCanvas = document.createElement('canvas');
-  const ctx = snapshotCanvas.getContext('2d');
-  snapshotCanvas.width = videoElement.videoWidth;
-  snapshotCanvas.height = videoElement.videoHeight;
-  ctx.drawImage(videoElement, 0, 0, snapshotCanvas.width, snapshotCanvas.height);
-  drawJewelry(smoothedLandmarks, ctx);
-  lastSnapshotDataURL = snapshotCanvas.toDataURL('image/png');
+  triggerFlash();
+  lastSnapshotDataURL = captureSnapshotDataURL();
   document.getElementById('snapshot-preview').src = lastSnapshotDataURL;
   document.getElementById('snapshot-modal').style.display = 'block';
 }
@@ -209,7 +262,116 @@ function closeSnapshotModal() {
   document.getElementById('snapshot-modal').style.display = 'none';
 }
 
+/* ------------ info modal ------------ */
 function toggleInfoModal() {
   const modal = document.getElementById('info-modal');
   modal.style.display = modal.style.display === 'block' ? 'none' : 'block';
+}
+
+/* ------------ TRY ALL logic ------------ */
+function stopAutoTry() {
+  autoTryRunning = false;
+  if (autoTryTimeout) clearTimeout(autoTryTimeout);
+  autoTryTimeout = null;
+  if (tryAllBtn) {
+    tryAllBtn.classList.remove('active');
+    tryAllBtn.textContent = 'Try All';
+  }
+}
+
+function toggleTryAll() {
+  if (autoTryRunning) {
+    stopAutoTry();
+  } else {
+    startAutoTry();
+  }
+}
+
+async function startAutoTry() {
+  if (!currentType) {
+    alert('Please choose Gold / Diamond and a jewelry type first.');
+    return;
+  }
+
+  const list = buildImageList(currentType);
+  if (!list.length) {
+    alert('No items found for this category.');
+    return;
+  }
+
+  autoSnapshots = [];
+  autoTryIndex = 0;
+  autoTryRunning = true;
+  tryAllBtn.classList.add('active');
+  tryAllBtn.textContent = 'Stop';
+
+  const step = async () => {
+    if (!autoTryRunning) return;
+
+    const src = list[autoTryIndex];
+
+    // apply jewelry
+    if (currentType.includes('earrings')) {
+      await changeEarring(src);
+    } else {
+      await changeNecklace(src);
+    }
+
+    // wait a bit for face + render
+    await new Promise(res => setTimeout(res, 800));
+
+    // capture with flash (no popup)
+    triggerFlash();
+    if (smoothedLandmarks) {
+      const dataURL = captureSnapshotDataURL();
+      autoSnapshots.push(dataURL);
+    }
+
+    autoTryIndex++;
+    if (autoTryIndex >= list.length) {
+      // done
+      stopAutoTry();
+      openGallery();
+      return;
+    }
+
+    autoTryTimeout = setTimeout(step, 2000); // next item after 2s
+  };
+
+  step();
+}
+
+/* ------------ Gallery (after TRY ALL) ------------ */
+function openGallery() {
+  if (!autoSnapshots.length) {
+    alert('No snapshots captured.');
+    return;
+  }
+
+  galleryThumbs.innerHTML = '';
+  autoSnapshots.forEach((src, idx) => {
+    const img = document.createElement('img');
+    img.src = src;
+    img.onclick = () => setGalleryMain(idx);
+    galleryThumbs.appendChild(img);
+  });
+
+  setGalleryMain(0);
+  galleryModal.style.display = 'flex';
+}
+
+function setGalleryMain(index) {
+  const src = autoSnapshots[index];
+  galleryMain.src = src;
+
+  const thumbs = galleryThumbs.querySelectorAll('img');
+  thumbs.forEach((t, i) => {
+    t.classList.toggle('active', i === index);
+  });
+}
+
+if (galleryClose) {
+  galleryClose.addEventListener('click', () => {
+    galleryModal.style.display = 'none';
+  });
 }

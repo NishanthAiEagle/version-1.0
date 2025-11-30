@@ -27,10 +27,22 @@
     </div>
   </div>
 
+  <!-- Gallery Modal (for TRY ALL) -->
+  <div id="gallery-modal">
+    <div class="gallery-content">
+      <span id="gallery-close" class="close-btn">&times;</span>
+      <h3>Your Looks Gallery</h3>
+      <img id="gallery-main" src="" alt="Main view" />
+      <div id="gallery-thumbs"></div>
+    </div>
+  </div>
+
   <!-- Jewelry Category Buttons -->
   <div id="jewelry-mode">
     <button onclick="toggleCategory('gold')">Gold</button>
     <button onclick="toggleCategory('diamond')">Diamond</button>
+    <!-- NEW TRY ALL BUTTON -->
+    <button id="tryall-btn" onclick="toggleTryAll()">Try All</button>
   </div>
 
   <!-- Subcategory Buttons -->
@@ -71,6 +83,9 @@
       <button class="close-btn" onclick="toggleInfoModal()">Got it!</button>
     </div>
   </div>
+
+  <!-- FLASH overlay for photo effect -->
+  <div id="flash-overlay"></div>
 
   <!-- Scripts -->
   <script src="https://cdn.jsdelivr.net/npm/@mediapipe/face_mesh/face_mesh.min.js"></script>
